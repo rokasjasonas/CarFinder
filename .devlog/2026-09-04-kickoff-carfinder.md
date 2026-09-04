@@ -70,3 +70,17 @@ Implemented in `shared/src/commonMain/kotlin/lt/carfinder/engine/MatchEngine.kt`
 ### Blog angle
 
 "Teaching taste in 300 lines: an explainable swipe-learning engine for a KMP car finder."
+
+## 20:20 — First GitHub release (v0.1.0)
+
+**Tags:** release, github-cli, android-signing
+
+Published the release APK to GitHub: repo `rokasjasonas/CarFinder` (created with `gh repo create --source=. --push` from the local-only repo), release `v0.1.0` with `CarFinder-0.1.0.apk` (12.6 MB) attached.
+
+### Solution
+- Release build signed with the debug keystore (`signingConfig = signingConfigs.getByName("debug")`) so the APK installs straight from the release page without a production keystore.
+- Build: `./gradlew :androidApp:assembleRelease` → `androidApp/build/outputs/apk/release/androidApp-release.apk`.
+
+### Tips & gotchas
+- `apksigner` from build-tools is a shell wrapper that needs `java` on PATH — it failed with "exec: java: not found" even though Gradle worked; exporting `JAVA_HOME` + `PATH=$JAVA_HOME/bin:$PATH` fixed verification.
+- `gh release create v0.1.0 <file>` uploads the asset in the same call; verify with `gh release view v0.1.0 --json assets`.

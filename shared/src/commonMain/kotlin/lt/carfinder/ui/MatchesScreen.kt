@@ -28,10 +28,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import lt.carfinder.AppViewModel
 import lt.carfinder.Route
 import lt.carfinder.engine.ScoredCar
@@ -81,7 +83,16 @@ private fun MatchRow(sc: ScoredCar, liked: Boolean, onClick: () -> Unit) {
     Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box {
-                CarArt(car, Modifier.size(width = 110.dp, height = 84.dp).clip(RoundedCornerShape(12.dp)), emojiSize = 36.sp)
+                if (car.photos.isNotEmpty()) {
+                    AsyncImage(
+                        model = car.photos.first(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(width = 110.dp, height = 84.dp).clip(RoundedCornerShape(12.dp)),
+                    )
+                } else {
+                    CarArt(car, Modifier.size(width = 110.dp, height = 84.dp).clip(RoundedCornerShape(12.dp)), emojiSize = 36.sp)
+                }
                 MatchBadge(sc.score, Modifier.align(Alignment.TopStart).padding(6.dp))
                 if (liked) {
                     Icon(
@@ -100,7 +111,12 @@ private fun MatchRow(sc: ScoredCar, liked: Boolean, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${car.priceEur.asPrice()}  ·  ${car.year}  ·  ${car.fuelType.label()}  ·  ${car.powerHp} hp",
+                    listOfNotNull(
+                        car.priceEur?.asPrice(),
+                        car.year?.toString(),
+                        car.fuelType?.label(),
+                        car.powerHp?.let { "$it hp" },
+                    ).joinToString("  ·  ").ifEmpty { car.source.name.lowercase() },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

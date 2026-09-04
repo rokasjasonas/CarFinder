@@ -54,16 +54,11 @@ fun QuizScreen(vm: AppViewModel) {
     var step by remember { mutableStateOf(0) }
     var budget by remember { mutableStateOf(25000) }
     var usage by remember { mutableStateOf<Usage?>(null) }
-    var minSeats by remember { mutableStateOf(5) }
     var fuels by remember { mutableStateOf(emptySet<FuelType>()) }
     var gearbox by remember { mutableStateOf<Gearbox?>(null) }
     var priority by remember { mutableStateOf<String?>(null) }
 
-    val stepValid = when (step) {
-        0 -> true
-        1 -> usage != null
-        else -> true
-    }
+    val stepValid = step != 1 || usage != null
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -111,17 +106,6 @@ fun QuizScreen(vm: AppViewModel) {
                 }
             }
             2 -> {
-                QuestionTitle("How many seats do you need?")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(2, 4, 5, 7).forEach { n ->
-                        FilterChip(
-                            selected = minSeats == n,
-                            onClick = { minSeats = n },
-                            label = { Text(if (n == 7) "7+" else "$n") },
-                        )
-                    }
-                }
-                Spacer(Modifier.height(24.dp))
                 QuestionTitle("Preferred fuel?")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
@@ -168,7 +152,6 @@ fun QuizScreen(vm: AppViewModel) {
                 QuestionTitle("All set!")
                 Text(
                     "I'll look for a ${usage?.usageLabel() ?: "versatile"} car for ${budget.asPrice()}, " +
-                        "$minSeats+ seats, " +
                         when {
                             gearbox == Gearbox.AUTOMATIC -> "automatic gearbox"
                             gearbox == Gearbox.MANUAL -> "manual gearbox"
@@ -179,7 +162,7 @@ fun QuizScreen(vm: AppViewModel) {
                     modifier = Modifier.padding(top = 8.dp),
                 )
                 Text(
-                    "Every swipe teaches me your taste — matches update as you go.",
+                    "Now open the Browse tab and scroll some listings — every swipe teaches me your taste.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
@@ -206,17 +189,17 @@ fun QuizScreen(vm: AppViewModel) {
                             UserPrefs(
                                 budgetEur = budget,
                                 usage = usage ?: Usage.COMMUTE,
-                                minSeats = minSeats,
                                 gearbox = gearbox,
                                 fuelPrefs = fuels,
                                 weights = w,
                             ),
                         )
+                        vm.tab = lt.carfinder.Tab.Browse
                     }
                 },
                 enabled = stepValid,
                 modifier = Modifier.weight(1f),
-            ) { Text(if (step < 5) "Next" else "Start swiping") }
+            ) { Text(if (step < 5) "Next" else "Start browsing") }
         }
         Spacer(Modifier.height(24.dp))
     }

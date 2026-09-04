@@ -4,9 +4,11 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ThumbsUpDown
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +24,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import lt.carfinder.AppViewModel
 import lt.carfinder.Route
@@ -68,6 +71,12 @@ private fun Tabs(vm: AppViewModel) {
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
+                    selected = vm.tab == Tab.Browse,
+                    onClick = { vm.tab = Tab.Browse },
+                    icon = { Icon(Icons.Default.Search, null) },
+                    label = { Text("Browse") },
+                )
+                NavigationBarItem(
                     selected = vm.tab == Tab.Discover,
                     onClick = { vm.tab = Tab.Discover },
                     icon = { Icon(Icons.Default.ThumbsUpDown, null) },
@@ -89,10 +98,17 @@ private fun Tabs(vm: AppViewModel) {
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            when (vm.tab) {
-                Tab.Discover -> SwipeScreen(vm)
-                Tab.Matches -> MatchesScreen(vm)
-                Tab.Profile -> ProfileScreen(vm)
+            // The WebView must stay mounted across tab switches or it reloads and loses history.
+            BrowseScreen(vm, visible = vm.tab == Tab.Browse)
+            if (vm.tab != Tab.Browse) {
+                Surface(Modifier.fillMaxSize()) {
+                    when (vm.tab) {
+                        Tab.Discover -> SwipeScreen(vm)
+                        Tab.Matches -> MatchesScreen(vm)
+                        Tab.Profile -> ProfileScreen(vm)
+                        Tab.Browse -> Unit
+                    }
+                }
             }
         }
     }

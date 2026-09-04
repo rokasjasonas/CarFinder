@@ -30,16 +30,24 @@ data class ScoredCar(
 object MatchEngine {
 
     const val HARD_BUDGET_FACTOR = 1.3f
-    const val ANNUAL_KM = 15000
     const val MAX_TASTE_WEIGHT = 3f
     const val LEARNING_RATE = 0.15f
 
-    fun annualCostEur(car: Car): Int {
-        val energyPerUnit = if (car.fuelType == FuelType.EV) 0.25f
-        else if (car.fuelType == FuelType.DIESEL) 1.55f
-        else 1.65f
-        val energyYear = (car.consumption * energyPerUnit).toFloat() * ANNUAL_KM / 100f
-        return (energyYear + 350f).toInt()
+    private val typicalConsumption = mapOf(
+        FuelType.PETROL to 7.0,
+        FuelType.DIESEL to 5.8,
+        FuelType.HYBRID to 5.0,
+        FuelType.EV to 17.0,
+    )
+
+    fun annualCostEur(car: Car): Int? {
+        val consumption = typicalConsumption[car.fuelType] ?: return null
+        val energyPerUnit = when (car.fuelType) {
+            FuelType.EV -> 0.25f
+            FuelType.DIESEL -> 1.55f
+            else -> 1.65f
+        }
+        return ((consumption * energyPerUnit).toFloat() * 150f).toInt() + 350
     }
 
     fun priceBucket(priceEur: Int): String = when {
@@ -49,25 +57,28 @@ object MatchEngine {
         else -> "50k+"
     }
 
-    fun excluded(car: Car, prefs: UserPrefs): Boolean =
-        car.priceEur > prefs.budgetEur * HARD_BUDGET_FACTOR ||
-            car.seats < prefs.minSeats ||
-            (prefs.gearbox != null && car.gearbox != prefs.gearbox)
+    fun excluded(car: Car, prefs: UserPrefs): Boolean {
+        val price = car.priceEur ?: return false
+        if (price > prefs.budgetEur * HARD_BUDGET_FACTOR) return true
+        if (prefs.gearbox != null && car.gearbox != null && car.gearbox != prefs.gearbox) return true
+        return false
+    }
 
     fun tasteWeight(swipes: Int): Float = MAX_TASTE_WEIGHT * min(1f, swipes / 10f)
 
     fun score(car: Car, prefs: UserPrefs, affinity: Map<String, Float>, tasteW: Float): ScoredCar {
         val comps = buildList {
-            add(budget(car, prefs))
+            budget(car, prefs)?.let { add(it) }
             add(usage(car, prefs))
-            add(cost(car, prefs))
-            add(space(car, prefs))
-            add(performance(car, prefs))
-            add(eco(car, prefs))
-            add(funFactor(car, prefs))
-            add(fuel(car, prefs))
-            prefs.gearbox?.let { add(gearbox(car, it)) }
-            if (tasteW > 0f) add(taste(car, affinity, tasteW))
+            cost(car, prefs)?.let { add(it) }
+            mileage(car)?.let { add(it) }
+            space(car, prefs)?.let { add(it) }
+            performance(car, prefs)?.let { add(it) }
+            eco(car, prefs)?.let { add(it) }
+            funFactor(car, prefs)?.let { add(it) }
+            fuel(car, prefs)?.let { add(it) }
+            gearbox(car, prefs)?.let { add(it) }
+            taste(car, affinity, tasteW)?.let { add(it) }
         }
         val weighted = comps.sumOf { (it.value * it.weight).toDouble() }
         val weights = comps.sumOf { it.weight.toDouble() }
@@ -93,7 +104,7 @@ object MatchEngine {
         random: Random = Random(42),
         count: Int = 20,
     ): List<Car> {
-        var pool = cars.filter { it.id !in seen && !excluded(it, prefs) }
+        var pool = cars.filter { it.id !in seen && !excluded(it, prefs) && it.photos.isNotEmpty() }
         val out = mutableListOf<Car>()
         while (out.size < count && pool.isNotEmpty()) {
             val scored = pool.map { score(it, prefs, affinity, tasteW) }
@@ -105,29 +116,30 @@ object MatchEngine {
     }
 
     fun learn(affinity: Map<String, Float>, car: Car, liked: Boolean, lr: Float = LEARNING_RATE): Map<String, Float> {
-        val keys = listOf(
-            "body:${car.bodyType}",
-            "fuel:${car.fuelType}",
-            "price:${priceBucket(car.priceEur)}",
-        )
+        val keys = buildList {
+            car.bodyType?.let { add("body:$it") }
+            car.fuelType?.let { add("fuel:$it") }
+            car.priceEur?.let { add("price:${priceBucket(it)}") }
+        }
+        if (keys.isEmpty()) return affinity
         val out = affinity.toMutableMap()
         for (k in keys) out[k] = ((out[k] ?: 0f) + if (liked) lr else -lr).coerceIn(-1f, 1f)
         return out
     }
 
-    private fun budget(car: Car, prefs: UserPrefs) = Component(
-        "budget", "Budget",
-        run {
-            val b = prefs.budgetEur.toFloat()
-            if (car.priceEur <= b) 1f else (1f - (car.priceEur - b) / (0.3f * b)).coerceIn(0f, 1f)
-        },
-        2f,
-        if (car.priceEur <= prefs.budgetEur) "${(prefs.budgetEur - car.priceEur).groupThousands()} € under budget" else null,
-    )
+    private fun budget(car: Car, prefs: UserPrefs): Component? {
+        val price = car.priceEur ?: return null
+        val b = prefs.budgetEur.toFloat()
+        val v = if (price <= b) 1f else (1f - (price - b) / (0.3f * b)).coerceIn(0f, 1f)
+        val reason = if (price <= b) "${(b - price).toInt().groupThousands()} € under budget" else null
+        return Component("budget", "Budget", v, 2f, reason)
+    }
 
     private fun usage(car: Car, prefs: UserPrefs): Component {
+        val body = car.bodyType
+        if (body == null) return Component("usage", "Lifestyle fit", 0.5f, 2.5f)
         var v = when (prefs.usage) {
-            Usage.COMMUTE -> when (car.bodyType) {
+            Usage.COMMUTE -> when (body) {
                 BodyType.HATCHBACK, BodyType.SEDAN -> 1f
                 BodyType.WAGON -> 0.8f
                 BodyType.SUV -> 0.6f
@@ -135,7 +147,7 @@ object MatchEngine {
                 BodyType.VAN -> 0.3f
                 BodyType.PICKUP -> 0.2f
             }
-            Usage.FAMILY -> when (car.bodyType) {
+            Usage.FAMILY -> when (body) {
                 BodyType.WAGON, BodyType.SUV -> 1f
                 BodyType.VAN -> 0.9f
                 BodyType.SEDAN -> 0.7f
@@ -144,7 +156,7 @@ object MatchEngine {
                 BodyType.COUPE -> 0.1f
                 BodyType.CONVERTIBLE -> 0.05f
             }
-            Usage.SPORT -> when (car.bodyType) {
+            Usage.SPORT -> when (body) {
                 BodyType.COUPE -> 1f
                 BodyType.CONVERTIBLE -> 0.95f
                 BodyType.SEDAN -> 0.4f
@@ -154,7 +166,7 @@ object MatchEngine {
                 BodyType.PICKUP -> 0.1f
                 BodyType.VAN -> 0.05f
             }
-            Usage.ADVENTURE -> when (car.bodyType) {
+            Usage.ADVENTURE -> when (body) {
                 BodyType.SUV -> 1f
                 BodyType.PICKUP -> 0.95f
                 BodyType.WAGON -> 0.6f
@@ -163,7 +175,7 @@ object MatchEngine {
                 BodyType.SEDAN -> 0.25f
                 BodyType.COUPE, BodyType.CONVERTIBLE -> 0.1f
             }
-            Usage.CITY -> when (car.bodyType) {
+            Usage.CITY -> when (body) {
                 BodyType.HATCHBACK -> 1f
                 BodyType.SEDAN -> 0.6f
                 BodyType.COUPE -> 0.5f
@@ -175,81 +187,97 @@ object MatchEngine {
             }
         }
         if ((prefs.usage == Usage.CITY || prefs.usage == Usage.COMMUTE) && car.fuelType == FuelType.EV) v = (v + 0.1f).coerceAtMost(1f)
-        if (prefs.usage == Usage.ADVENTURE && car.drive == Drive.AWD) v = (v + 0.15f).coerceAtMost(1f)
-        if (prefs.usage == Usage.FAMILY && car.seats >= 6) v = (v + 0.1f).coerceAtMost(1f)
+        if (prefs.usage == Usage.FAMILY && car.sevenSeatHint()) v = (v + 0.1f).coerceAtMost(1f)
         val reason = if (v >= 0.75f) "Great fit for ${prefs.usage.usageLabel()}" else null
         return Component("usage", "Lifestyle fit", v, 2.5f, reason)
     }
 
-    private fun cost(car: Car, prefs: UserPrefs): Component {
-        val annual = annualCostEur(car)
+    private fun cost(car: Car, prefs: UserPrefs): Component? {
+        val annual = annualCostEur(car) ?: return null
         val v = (1f - (annual - 600f) / 2200f).coerceIn(0f, 1f)
         val reason = if (annual <= 1100 && prefs.weights.runningCost >= 0.3f) "Low running costs (~${annual.groupThousands()} €/yr)" else null
         return Component("cost", "Running costs", v, 1f + 2f * prefs.weights.runningCost, reason)
     }
 
-    private fun space(car: Car, prefs: UserPrefs): Component {
-        val seatScore = min(car.seats, prefs.minSeats).toFloat() / prefs.minSeats
-        val trunkNeed = when (prefs.usage) {
-            Usage.FAMILY -> 500f
-            Usage.ADVENTURE -> 450f
-            Usage.COMMUTE -> 300f
-            Usage.CITY -> 250f
-            Usage.SPORT -> 200f
+    private fun mileage(car: Car): Component? {
+        val km = car.mileageKm ?: return null
+        val v = (1f - km / 250000f).coerceIn(0f, 1f)
+        val reason = if (km < 80_000) "Low mileage: ${km.groupThousands()} km" else null
+        return Component("mileage", "Mileage", v, 1.2f, reason)
+    }
+
+    private fun space(car: Car, prefs: UserPrefs): Component? {
+        val body = car.bodyType ?: return null
+        val bootProxy = when (body) {
+            BodyType.WAGON, BodyType.SUV, BodyType.VAN, BodyType.PICKUP -> 1f
+            BodyType.SEDAN, BodyType.HATCHBACK -> 0.6f
+            BodyType.COUPE, BodyType.CONVERTIBLE -> 0.25f
         }
-        val trunkScore = (car.trunkL / trunkNeed).coerceAtMost(1f)
-        val v = seatScore * 0.6f + trunkScore * 0.4f
-        val reason = if (v >= 0.8f) "Fits ${prefs.minSeats} people + luggage" else null
+        val seatProxy = if (car.sevenSeatHint()) 1f else 0.65f
+        val v = bootProxy * 0.7f + seatProxy * 0.3f
+        val reason = if (v >= 0.85f) "Roomy: ${body.name.lowercase().replaceFirstChar { it.uppercase() }}" else null
         return Component("space", "Space", v, 1f + 2f * prefs.weights.space, reason)
     }
 
-    private fun performance(car: Car, prefs: UserPrefs): Component {
-        val v = ((car.powerHp - 60f) / 290f).coerceIn(0f, 1f)
-        val reason = if (v >= 0.6f) "Quick: ${car.powerHp} hp" else null
+    private fun performance(car: Car, prefs: UserPrefs): Component? {
+        val hp = car.powerHp ?: return null
+        val v = ((hp - 60f) / 290f).coerceIn(0f, 1f)
+        val reason = if (v >= 0.6f) "Quick: $hp hp" else null
         return Component("performance", "Performance", v, 1f + 2f * prefs.weights.performance, reason)
     }
 
-    private fun eco(car: Car, prefs: UserPrefs): Component {
-        val v = when (car.fuelType) {
+    private fun eco(car: Car, prefs: UserPrefs): Component? {
+        val fuel = car.fuelType ?: return null
+        val v = when (fuel) {
             FuelType.EV -> 1f
             FuelType.HYBRID -> 0.75f
             FuelType.PETROL -> 0.45f
             FuelType.DIESEL -> 0.35f
         }
-        val reason = if (car.fuelType == FuelType.EV && prefs.weights.eco >= 0.3f) "Zero tailpipe emissions" else null
+        val reason = if (fuel == FuelType.EV && prefs.weights.eco >= 0.3f) "Zero tailpipe emissions" else null
         return Component("eco", "Eco", v, 1f + 2f * prefs.weights.eco, reason)
     }
 
-    private fun funFactor(car: Car, prefs: UserPrefs): Component {
-        val hpNorm = ((car.powerHp - 60f) / 290f).coerceIn(0f, 1f)
-        var v = 0.45f + 0.25f * hpNorm
-        if (car.drive == Drive.RWD) v += 0.2f else if (car.drive == Drive.AWD) v += 0.1f
-        if (car.bodyType == BodyType.COUPE || car.bodyType == BodyType.CONVERTIBLE) v += 0.15f
+    private fun funFactor(car: Car, prefs: UserPrefs): Component? {
+        val hpNorm = car.powerHp?.let { ((it - 60f) / 290f).coerceIn(0f, 1f) }
+        val body = car.bodyType
+        if (hpNorm == null && body == null) return null
+        var v = 0.4f + 0.25f * (hpNorm ?: 0.3f)
+        if (body == BodyType.COUPE || body == BodyType.CONVERTIBLE) v += 0.2f
         v = v.coerceIn(0f, 1f)
-        val reason = if (v >= 0.8f) "Proper driver's car" else null
+        val reason = if (v >= 0.75f) "Proper driver's car" else null
         return Component("fun", "Driving fun", v, 1f + 2f * prefs.weights.drivingFun, reason)
     }
 
-    private fun fuel(car: Car, prefs: UserPrefs): Component {
-        val v = if (prefs.fuelPrefs.isEmpty()) 0.5f else if (car.fuelType in prefs.fuelPrefs) 1f else 0.2f
-        val reason = if (prefs.fuelPrefs.isNotEmpty() && car.fuelType in prefs.fuelPrefs) "Matches your fuel preference" else null
-        return Component("fuel", "Fuel choice", v, if (prefs.fuelPrefs.isEmpty()) 0f else 1.5f, reason)
+    private fun fuel(car: Car, prefs: UserPrefs): Component? {
+        val fuel = car.fuelType ?: return null
+        if (prefs.fuelPrefs.isEmpty()) return null
+        val v = if (fuel in prefs.fuelPrefs) 1f else 0.2f
+        val reason = if (v == 1f) "Matches your fuel preference" else null
+        return Component("fuel", "Fuel choice", v, 1.5f, reason)
     }
 
-    private fun gearbox(car: Car, pref: Gearbox): Component {
-        val v = if (car.gearbox == pref) 1f else 0f
+    private fun gearbox(car: Car, prefs: UserPrefs): Component? {
+        val pref = prefs.gearbox ?: return null
+        val gb = car.gearbox ?: return null
+        val v = if (gb == pref) 1f else 0f
         val reason = if (v == 1f && pref == Gearbox.AUTOMATIC) "Automatic gearbox" else null
         return Component("gearbox", "Gearbox", v, 1f, reason)
     }
 
-    private fun taste(car: Car, affinity: Map<String, Float>, weight: Float): Component {
-        val keys = listOf(
-            "body:${car.bodyType}",
-            "fuel:${car.fuelType}",
-            "price:${priceBucket(car.priceEur)}",
-        )
+    private fun taste(car: Car, affinity: Map<String, Float>, weight: Float): Component? {
+        if (weight <= 0f) return null
+        val keys = buildList {
+            car.bodyType?.let { add("body:$it") }
+            car.fuelType?.let { add("fuel:$it") }
+            car.priceEur?.let { add("price:${priceBucket(it)}") }
+        }
+        if (keys.isEmpty()) return null
         val v = keys.map { ((affinity[it] ?: 0f) + 1f) / 2f }.average().toFloat()
         val reason = if (v >= 0.65f) "Similar to cars you liked" else null
         return Component("taste", "Your taste", v, weight, reason)
     }
 }
+
+private fun Car.sevenSeatHint(): Boolean =
+    Regex("7\\s*viet|7-seat|7 seat", RegexOption.IGNORE_CASE).containsMatchIn(title)

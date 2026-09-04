@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,17 +42,20 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import lt.carfinder.AppViewModel
 import lt.carfinder.Route
 import lt.carfinder.Tab
 import lt.carfinder.model.Car
+import lt.carfinder.sites.Sites
 import lt.carfinder.util.asPrice
 import lt.carfinder.util.label
+import lt.carfinder.util.groupThousands
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -62,6 +66,19 @@ fun SwipeScreen(vm: AppViewModel) {
     val top = deck.firstOrNull()
     val next = deck.getOrNull(1)
     var offsetX by remember(top?.id) { mutableStateOf(0f) }
+
+    // Hidden WebView prefetches the top listing page so its card gains the full photo gallery.
+    val prefetch = remember { WebController() }
+    SiteWebView(
+        controller = prefetch,
+        startUrl = "about:blank",
+        onPayload = vm::onPayload,
+        onUrlChanged = {},
+        modifier = Modifier.size(1.dp).alpha(0f),
+    )
+    LaunchedEffect(top?.id, next?.id) {
+        listOfNotNull(top, next).firstOrNull { vm.needsGallery(it) }?.let { prefetch.loadUrl(it.url) }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().padding(16.dp, 12.dp, 16.dp, 4.dp)) {
@@ -81,15 +98,17 @@ fun SwipeScreen(vm: AppViewModel) {
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("You've seen every car that fits", style = MaterialTheme.typography.titleLarge)
+                Text("No cars in the deck yet", style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "Check your ranked matches or adjust your preferences to widen the search.",
+                    "Open the Browse tab, pick a site and scroll some search results — every listing you see lands here.",
                     Modifier.padding(top = 8.dp, bottom = 16.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Button(onClick = { vm.tab = Tab.Matches }) { Text("See your matches") }
-                OutlinedButton(onClick = { vm.tab = Tab.Profile }) { Text("Adjust preferences") }
+                Button(onClick = { vm.tab = Tab.Browse }) { Text("Browse cars") }
+                if (state.swipes.isNotEmpty()) {
+                    OutlinedButton(onClick = { vm.tab = Tab.Matches }) { Text("See your matches") }
+                }
             }
             return@Column
         }
@@ -107,7 +126,7 @@ fun SwipeScreen(vm: AppViewModel) {
                     .pointerInput(top.id) {
                         detectDragGestures(
                             onDragEnd = {
-                if (abs(offsetX) > threshold) vm.swipe(top.id, liked = offsetX > 0) else offsetX = 0f
+                                if (abs(offsetX) > threshold) vm.swipe(top.id, liked = offsetX > 0) else offsetX = 0f
                             },
                             onDragCancel = { offsetX = 0f },
                         ) { change, drag -> change.consume(); offsetX += drag.x }
@@ -147,38 +166,25 @@ private fun CarCard(vm: AppViewModel, car: Car, modifier: Modifier) {
     val scored = vm.scored(car)
     Card(modifier, shape = RoundedCornerShape(20.dp), elevation = CardDefaults.cardElevation(6.dp)) {
         Column(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))) {
-                CarArt(car, Modifier.fillMaxSize(), emojiSize = 84.sp)
-                scored?.let {
-                    MatchBadge(it.score, Modifier.align(Alignment.TopStart).padding(12.dp))
-                }
-                Text(
-                    car.year.toString(),
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
-                )
-            }
+            PhotoArea(vm, car, Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)))
             Column(
-                Modifier.fillMaxWidth().clickable { vm.open(Route.CarDetail(car.id)) }.padding(16.dp),
+                Modifier.fillMaxWidth().clickable { vm.open(Route.CarDetail(car.id)) }.padding(16.dp, 0.dp, 16.dp, 16.dp),
             ) {
                 Text(car.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(
-                    car.priceEur.asPrice(),
+                    car.priceEur?.asPrice() ?: "Price on request",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
                 Text(
-                    listOf(
-                        car.bodyType.label(),
-                        car.fuelType.label(),
-                        car.gearbox.label(),
-                        "${car.powerHp} hp",
-                        "${car.seats} seats",
-                    ).joinToString("  ·  "),
+                    listOfNotNull(
+                        car.year?.toString(),
+                        car.mileageKm?.let { "${it.groupThousands()} km" },
+                        car.fuelType?.label(),
+                        car.gearbox?.label(),
+                        car.powerHp?.let { "$it hp" },
+                    ).joinToString("  ·  ").ifEmpty { car.source.name.lowercase() },
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -196,13 +202,43 @@ private fun CarCard(vm: AppViewModel, car: Car, modifier: Modifier) {
 }
 
 @Composable
-fun ReasonChip(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSecondaryContainer,
-        modifier = modifier
-            .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-    )
+private fun PhotoArea(vm: AppViewModel, car: Car, modifier: Modifier) {
+    var photo by remember(car.id, car.photos.size) { mutableStateOf(0) }
+    val count = car.photos.size
+    if (photo >= count) photo = 0
+    Box(modifier) {
+        if (count == 0) {
+            CarArt(car, Modifier.fillMaxSize())
+        } else {
+            AsyncImage(
+                model = car.photos.getOrNull(photo),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxSize().clickable { photo = (photo - 1 + count) % count })
+                Box(Modifier.weight(1f).fillMaxSize().clickable { photo = (photo + 1) % count })
+            }
+            if (count > 1) {
+                Text(
+                    "${photo + 1} / $count",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                )
+            }
+        }
+        vm.scored(car)?.let { MatchBadge(it.score, Modifier.align(Alignment.TopStart).padding(12.dp)) }
+        Text(
+            car.source.label(),
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.align(Alignment.BottomStart).padding(10.dp)
+                .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+    }
 }

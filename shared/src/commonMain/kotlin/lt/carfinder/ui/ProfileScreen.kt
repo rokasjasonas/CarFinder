@@ -41,7 +41,6 @@ fun ProfileScreen(vm: AppViewModel) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PrefRow("Budget", prefs.budgetEur.asPrice())
                 PrefRow("Main use", prefs.usage.usageLabel().replaceFirstChar { it.uppercase() })
-                PrefRow("Seats needed", "${prefs.minSeats}+")
                 PrefRow("Gearbox", prefs.gearbox?.label() ?: "Any")
                 PrefRow("Fuel", if (prefs.fuelPrefs.isEmpty()) "Any" else prefs.fuelPrefs.joinToString { it.label() })
                 Spacer(Modifier.height(4.dp))
@@ -57,7 +56,7 @@ fun ProfileScreen(vm: AppViewModel) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Taste learning", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "Liked ${state.likedCount} · passed ${state.passedCount}",
+                    "Harvested ${state.listings.size} listings from autoplius.lt & autogidas.lt · liked ${state.likedCount} · passed ${state.passedCount}",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(

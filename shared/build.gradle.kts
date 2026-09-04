@@ -38,6 +38,14 @@ kotlin {
             implementation(libs.jb.lifecycle.viewmodel.compose)
             implementation(libs.jb.lifecycle.runtime.compose)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.coil.compose)
+        }
+        androidMain.dependencies {
+            implementation(libs.coil.network.okhttp)
+        }
+        iosMain.dependencies {
+            implementation(libs.coil.network.ktor3)
+            implementation(libs.ktor.client.darwin)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

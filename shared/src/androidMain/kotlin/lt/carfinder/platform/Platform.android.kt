@@ -24,3 +24,9 @@ actual object FileStore {
         tmp.renameTo(f)
     }
 }
+
+actual fun openInBrowser(url: String) {
+    AndroidPlatform.context.startActivity(
+        android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)),
+    )
+}

@@ -58,9 +58,12 @@ object MatchEngine {
     }
 
     fun excluded(car: Car, prefs: UserPrefs): Boolean {
-        val price = car.priceEur ?: return false
-        if (price > prefs.budgetEur * HARD_BUDGET_FACTOR) return true
+        val price = car.priceEur
+        if (price != null && price > prefs.budgetEur * HARD_BUDGET_FACTOR) return true
         if (prefs.gearbox != null && car.gearbox != null && car.gearbox != prefs.gearbox) return true
+        if (prefs.minYear != null && car.year != null && car.year < prefs.minYear) return true
+        if (prefs.maxMileageKm != null && car.mileageKm != null && car.mileageKm > prefs.maxMileageKm) return true
+        if (prefs.minPowerHp != null && car.powerHp != null && car.powerHp < prefs.minPowerHp) return true
         return false
     }
 
@@ -78,6 +81,9 @@ object MatchEngine {
             funFactor(car, prefs)?.let { add(it) }
             fuel(car, prefs)?.let { add(it) }
             gearbox(car, prefs)?.let { add(it) }
+            freshness(car)?.let { add(it) }
+            brand(car, prefs)?.let { add(it) }
+            bodyStyle(car, prefs)?.let { add(it) }
             taste(car, affinity, tasteW)?.let { add(it) }
         }
         val weighted = comps.sumOf { (it.value * it.weight).toDouble() }
@@ -263,6 +269,29 @@ object MatchEngine {
         val v = if (gb == pref) 1f else 0f
         val reason = if (v == 1f && pref == Gearbox.AUTOMATIC) "Automatic gearbox" else null
         return Component("gearbox", "Gearbox", v, 1f, reason)
+    }
+
+    private fun freshness(car: Car): Component? {
+        val year = car.year ?: return null
+        val v = ((year - 2003f) / 21f).coerceIn(0f, 1f)
+        val reason = if (year >= 2020) "Nearly new: $year" else null
+        return Component("year", "Freshness", v, 0.8f, reason)
+    }
+
+    private fun brand(car: Car, prefs: UserPrefs): Component? {
+        if (prefs.likedBrands.isEmpty()) return null
+        val b = car.brand ?: return null
+        val v = if (b in prefs.likedBrands) 1f else 0.3f
+        val reason = if (v == 1f) "You like $b" else null
+        return Component("brand", "Brand", v, 1.5f, reason)
+    }
+
+    private fun bodyStyle(car: Car, prefs: UserPrefs): Component? {
+        if (prefs.likedBodies.isEmpty()) return null
+        val body = car.bodyType ?: return null
+        val v = if (body in prefs.likedBodies) 1f else 0.3f
+        val reason = if (v == 1f) "${body.name.lowercase().replaceFirstChar { it.uppercase() }} is on your list" else null
+        return Component("bodies", "Body style", v, 1.5f, reason)
     }
 
     private fun taste(car: Car, affinity: Map<String, Float>, weight: Float): Component? {

@@ -162,7 +162,7 @@ fun QuizScreen(vm: AppViewModel) {
                     modifier = Modifier.padding(top = 8.dp),
                 )
                 Text(
-                    "Now open the Browse tab and scroll some listings — every swipe teaches me your taste.",
+                    "I'll fetch fresh listings from autoplius.lt & autogidas.lt myself — you just swipe and answer. Every swipe and every answer sharpens your matches.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
@@ -194,12 +194,12 @@ fun QuizScreen(vm: AppViewModel) {
                                 weights = w,
                             ),
                         )
-                        vm.tab = lt.carfinder.Tab.Browse
+                        vm.tab = lt.carfinder.Tab.Discover
                     }
                 },
                 enabled = stepValid,
                 modifier = Modifier.weight(1f),
-            ) { Text(if (step < 5) "Next" else "Start browsing") }
+            ) { Text(if (step < 5) "Next" else "Find my car") }
         }
         Spacer(Modifier.height(24.dp))
     }

@@ -53,7 +53,10 @@ fun MatchesScreen(vm: AppViewModel) {
     ) {
         item {
             Column(Modifier.padding(bottom = 4.dp)) {
-                Text("Your top matches", style = MaterialTheme.typography.headlineSmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Your top matches", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                    Text("🎯 ${vm.sharpness}% tuned", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                }
                 Text(
                     "Ranked by your quiz answers + the taste learned from your swipes.",
                     style = MaterialTheme.typography.labelSmall,

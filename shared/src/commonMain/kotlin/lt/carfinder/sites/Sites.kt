@@ -15,6 +15,8 @@ data class Site(
     val defaultSearch: String,
 ) {
     val label: String get() = source.name.lowercase().replaceFirstChar { it.uppercase() }
+
+    fun searchPage(page: Int): String = if (page <= 1) defaultSearch else "$defaultSearch?page=$page"
 }
 
 object Sites {
@@ -205,7 +207,10 @@ object Sites {
     private fun toCar(p: Payload): Car? {
         val id = p.id ?: listingId(p.url) ?: return null
         if (p.title.isBlank() && p.photos.isEmpty()) return null
-        if (Regex("^ieškau|^perku|^iestrauk", RegexOption.IGNORE_CASE).containsMatchIn(p.title.trim())) return null
+        if (junkTitle(p.title)) return null
+        val year = p.year?.takeIf { it in 1950..2035 }
+        val mileageKm = p.mileageKm?.takeIf { it in 100..1_500_000 }
+        if (year == null && mileageKm == null) return null
         val source = detect(p.url).source
         return Car(
             id = id,
@@ -213,8 +218,8 @@ object Sites {
             url = p.url,
             title = p.title.ifBlank { "Listing $id" },
             priceEur = p.price?.takeIf { it in 100..2_000_000 },
-            year = p.year?.takeIf { it in 1950..2035 },
-            mileageKm = p.mileageKm?.takeIf { it in 100..1_500_000 },
+            year = year,
+            mileageKm = mileageKm,
             fuelType = p.fuel?.let { normalizeFuel(it) },
             gearbox = p.gearbox?.let { normalizeGearbox(it) },
             bodyType = inferBodyType(p.title + " " + p.url),
@@ -226,6 +231,15 @@ object Sites {
     }
 
     private fun nowMillis(): Long = kotlin.time.Clock.System.now().toEpochMilliseconds()
+
+    fun junkTitle(title: String): Boolean {
+        val s = title.trim()
+        return Regex("supirkim|perkame|išperkame|isperkame|pirktume|^ieškau|^perku|^iestrauk|detali[eu]s?\\b.*(parduod)|parduodu.*dalim", RegexOption.IGNORE_CASE)
+            .containsMatchIn(s)
+    }
+
+    /** A car worth keeping: not a junk/service ad and looks like a real listing. */
+    fun plausible(c: Car): Boolean = !junkTitle(c.title) && (c.year != null || c.mileageKm != null)
 
     fun normalizeFuel(raw: String): FuelType? {
         val s = raw.lowercase()

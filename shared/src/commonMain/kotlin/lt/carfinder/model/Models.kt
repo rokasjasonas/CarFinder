@@ -25,7 +25,9 @@ data class Car(
     val engine: String? = null,
     val photos: List<String> = emptyList(),
     val capturedAt: Long = 0,
-)
+) {
+    val brand: String? get() = title.trim().split(Regex("\\s+")).firstOrNull()?.takeIf { it.length >= 2 && it.first().isLetter() }
+}
 
 @Serializable
 data class Weights(
@@ -43,6 +45,11 @@ data class UserPrefs(
     val gearbox: Gearbox? = null,
     val fuelPrefs: Set<FuelType> = emptySet(),
     val weights: Weights = Weights(),
+    val minYear: Int? = null,
+    val maxMileageKm: Int? = null,
+    val minPowerHp: Int? = null,
+    val likedBodies: Set<BodyType> = emptySet(),
+    val likedBrands: Set<String> = emptySet(),
 )
 
 @Serializable
@@ -54,6 +61,7 @@ data class AppState(
     val listings: List<Car> = emptyList(),
     val swipes: List<Swipe> = emptyList(),
     val affinity: Map<String, Float> = emptyMap(),
+    val answered: Set<String> = emptySet(),
 ) {
     val likedCount: Int get() = swipes.count { it.liked }
     val passedCount: Int get() = swipes.count { !it.liked }

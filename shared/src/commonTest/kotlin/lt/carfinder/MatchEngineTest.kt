@@ -12,6 +12,7 @@ import lt.carfinder.model.Weights
 import lt.carfinder.sites.Sites
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -33,9 +34,10 @@ class MatchEngineTest {
         fuel: FuelType? = FuelType.PETROL,
         gearbox: Gearbox? = Gearbox.AUTOMATIC,
         hp: Int? = 150,
+        year: Int = 2021,
     ) = Car(
         id = id, source = Source.AUTOPLIUS, url = "https://autoplius.lt/skelbimai/test-$id.html",
-        title = "Test $id", priceEur = price, year = 2021, mileageKm = mileage,
+        title = "Test $id", priceEur = price, year = year, mileageKm = mileage,
         fuelType = fuel, gearbox = gearbox, bodyType = body, powerHp = hp,
         photos = listOf("https://img.example/$id.jpg"),
     )
@@ -72,10 +74,10 @@ class MatchEngineTest {
         val otherSuv = car(id = "ap-3", body = BodyType.SUV, price = 25000)
         val wagon = car(id = "ap-4", body = BodyType.WAGON, price = 25000)
 
-        val before = MatchEngine.score(otherSuv, familyPrefs, emptyMap(), tasteW = 3f).score
+        val before = MatchEngine.score(otherSuv, familyPrefs, emptyMap(), tasteW = 3f).components.first { it.key == "taste" }.value
         val learned = MatchEngine.learn(emptyMap(), suv, liked = true)
-        val after = MatchEngine.score(otherSuv, familyPrefs, learned, tasteW = 3f).score
-        val wagonAfter = MatchEngine.score(wagon, familyPrefs, learned, tasteW = 3f).score
+        val after = MatchEngine.score(otherSuv, familyPrefs, learned, tasteW = 3f).components.first { it.key == "taste" }.value
+        val wagonAfter = MatchEngine.score(wagon, familyPrefs, learned, tasteW = 3f).components.first { it.key == "taste" }.value
 
         assertTrue(after > before, "liking an SUV should raise the score of another SUV")
         assertTrue(after - before > wagonAfter - before, "learned taste should favour SUVs over wagons")
@@ -124,6 +126,61 @@ class MatchEngineTest {
         val evEco = ev.components.first { it.key == "eco" }.value
         val dEco = diesel.components.first { it.key == "eco" }.value
         assertTrue(evEco > dEco)
+    }
+
+    @Test
+    fun refinedHardFiltersExcludeKnownValuesButPassUnknowns() {
+        val strict = familyPrefs.copy(minYear = 2015, maxMileageKm = 150_000, minPowerHp = 120)
+        assertTrue(MatchEngine.excluded(car(year = 2010), strict))
+        assertTrue(MatchEngine.excluded(car(mileage = 200_000), strict))
+        assertTrue(MatchEngine.excluded(car(hp = 90), strict))
+        assertTrue(!MatchEngine.excluded(car(), strict))
+        val unknowns = Car(id = "ap-20", source = Source.AUTOPLIUS, url = "u", title = "Mystery", photos = listOf("p.jpg"))
+        assertTrue(!MatchEngine.excluded(unknowns, strict), "cars with unknown fields must never be excluded")
+    }
+
+    @Test
+    fun pricelessCarsStillExcludedByKnownFields() {
+        val strict = familyPrefs.copy(minYear = 2015, maxMileageKm = 150_000, minPowerHp = 120)
+        assertTrue(MatchEngine.excluded(car("ap-30", price = null, year = 2010), strict))
+        assertTrue(MatchEngine.excluded(car("ap-31", price = null, mileage = 200_000), strict))
+        assertTrue(MatchEngine.excluded(car("ap-32", price = null, hp = 90), strict))
+        assertTrue(!MatchEngine.excluded(car("ap-33", price = null), strict))
+    }
+
+    @Test
+    fun likedBrandAndBodyBoostScores() {
+        val bmw = car(id = "ap-21").copy(title = "BMW 320d Touring")
+        val opel = car(id = "ap-22").copy(title = "Opel Astra Sports Tourer")
+        val tuned = familyPrefs.copy(likedBrands = setOf("BMW"), likedBodies = setOf(BodyType.WAGON))
+        val bmwScore = MatchEngine.score(bmw, tuned, emptyMap(), 0f)
+        val opelScore = MatchEngine.score(opel, tuned, emptyMap(), 0f)
+        assertTrue(bmwScore.score > opelScore.score, "liked brand should outrank an unlisted brand")
+        assertTrue(bmwScore.components.any { it.key == "brand" && it.reason != null })
+        val neutral = MatchEngine.score(bmw, familyPrefs, emptyMap(), 0f)
+        assertTrue(!neutral.components.any { it.key == "brand" }, "brand component only appears once brands are answered")
+    }
+
+    @Test
+    fun brandIsExtractedFromTitle() {
+        assertEquals("BMW", car().copy(title = "BMW 320d M Sport").brand)
+        assertEquals("Škoda", car().copy(title = "Škoda  Octavia").brand)
+        assertNull(car().copy(title = "9").brand)
+    }
+
+    @Test
+    fun sharpnessCountsAnsweredQuestions() {
+        assertEquals(0, lt.carfinder.engine.Refine.sharpness(emptySet()))
+        assertEquals(50, lt.carfinder.engine.Refine.sharpness(lt.carfinder.engine.Refine.INITIAL.toSet()))
+        assertEquals(100, lt.carfinder.engine.Refine.sharpness((lt.carfinder.engine.Refine.INITIAL + lt.carfinder.engine.Refine.EXTRA).toSet()))
+        assertEquals(70, lt.carfinder.engine.Refine.sharpness((lt.carfinder.engine.Refine.INITIAL + listOf("year", "brands")).toSet()))
+    }
+
+    @Test
+    fun searchPageBuildsPaginatedUrls() {
+        assertEquals(Sites.AUTOPLIUS.defaultSearch, Sites.AUTOPLIUS.searchPage(1))
+        assertEquals("https://autoplius.lt/skelbimai/naudoti-automobiliai?page=3", Sites.AUTOPLIUS.searchPage(3))
+        assertEquals("https://autogidas.lt/skelbimai/automobiliai/?page=2", Sites.AUTOGIDAS.searchPage(2))
     }
 }
 
@@ -197,5 +254,35 @@ class SitesTest {
         assertEquals(Gearbox.AUTOMATIC, c.gearbox)
         assertEquals(BodyType.WAGON, c.bodyType)
         assertEquals(190, c.powerHp)
+    }
+
+    @Test
+    fun dropsJunkWeBuyAdsAndFieldlessPayloads() {
+        val raw = """
+            {"items":[
+              {"id":"111","url":"https://autoplius.lt/skelbimai/automobiliu-supirkimas-111.html","title":"Automobilių supirkimas","price":1000,"photos":["https://x/a.jpg"]},
+              {"id":"112","url":"https://autoplius.lt/skelbimai/perkame-automobilius-112.html","title":"Perkame automobilius","price":1000,"photos":["https://x/b.jpg"]},
+              {"id":"113","url":"https://autoplius.lt/skelbimai/bmw-530-113.html","title":"BMW 530","price":5000},
+              {"id":"114","url":"https://autoplius.lt/skelbimai/bmw-530-114.html","title":"BMW 530 2015","year":2015,"photos":["https://x/c.jpg"]}
+            ]}
+        """.trimIndent()
+        val cars = (Sites.parse(raw) as Sites.Captured.Many).cars
+        assertEquals(listOf("114"), cars.map { it.id })
+        assertEquals(2015, cars[0].year)
+    }
+
+    @Test
+    fun plausibleRejectsJunkAdsAndFieldlessCars() {
+        fun car(id: String, title: String, year: Int? = null, mileage: Int? = null) = Car(
+            id = id, source = Source.AUTOPLIUS, url = "https://autoplius.lt/skelbimai/x-$id.html",
+            title = title, priceEur = 1000, year = year, mileageKm = mileage, capturedAt = 0L,
+        )
+        assertTrue(Sites.plausible(car("114", "BMW 530 2015", year = 2015)))
+        assertTrue(Sites.plausible(car("115", "BMW 530", mileage = 120_000)))
+        assertTrue(Sites.junkTitle("Perkame automobilius"))
+        assertTrue(Sites.junkTitle("Automobilių supirkimas"))
+        assertTrue(Sites.junkTitle("Ieškau automobilio"))
+        assertFalse(Sites.plausible(car("111", "Perkame automobilius", year = 2020)))
+        assertFalse(Sites.plausible(car("113", "BMW 530")))
     }
 }

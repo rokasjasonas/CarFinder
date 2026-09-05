@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
@@ -67,24 +68,21 @@ fun SwipeScreen(vm: AppViewModel) {
     val next = deck.getOrNull(1)
     var offsetX by remember(top?.id) { mutableStateOf(0f) }
 
-    // Hidden WebView prefetches the top listing page so its card gains the full photo gallery.
-    val prefetch = remember { WebController() }
-    SiteWebView(
-        controller = prefetch,
-        startUrl = "about:blank",
-        onPayload = vm::onPayload,
-        onUrlChanged = {},
-        modifier = Modifier.size(1.dp).alpha(0f),
-    )
-    LaunchedEffect(top?.id, next?.id) {
-        listOfNotNull(top, next).firstOrNull { vm.needsGallery(it) }?.let { prefetch.loadUrl(it.url) }
+    // Keep the deck stocked from the hidden harvester; prefetch the top card's full gallery too.
+    LaunchedEffect(deck.size, vm.state.listings.size) {
+        if (deck.size < 8) vm.ensureCars()
+        listOfNotNull(top, next).forEach { vm.requestGallery(it) }
     }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().padding(16.dp, 12.dp, 16.dp, 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Find your perfect car", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                Text("${deck.size} left", style = MaterialTheme.typography.labelMedium)
+                if (vm.fetchBusy) {
+                    Text("fetching…", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                } else {
+                    Text("${deck.size} left", style = MaterialTheme.typography.labelMedium)
+                }
             }
             Text(
                 "Swipe right if you love it · left to pass",
@@ -98,14 +96,29 @@ fun SwipeScreen(vm: AppViewModel) {
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("No cars in the deck yet", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "Open the Browse tab, pick a site and scroll some search results — every listing you see lands here.",
-                    Modifier.padding(top = 8.dp, bottom = 16.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Button(onClick = { vm.tab = Tab.Browse }) { Text("Browse cars") }
+                if (vm.fetchBusy) {
+                    CircularProgressIndicator(Modifier.size(48.dp))
+                    Text(
+                        "Fetching fresh listings for you…",
+                        Modifier.padding(top = 16.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        "Search pages from autoplius.lt & autogidas.lt",
+                        Modifier.padding(top = 4.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text("Nothing matches your answers yet", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "Every fetched listing was filtered out. Loosen a filter in Refine — or raise your budget — and fresh cars will land here.",
+                        Modifier.padding(top = 8.dp, bottom = 16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(onClick = { vm.tab = Tab.Refine }) { Text("Adjust answers") }
+                }
                 if (state.swipes.isNotEmpty()) {
                     OutlinedButton(onClick = { vm.tab = Tab.Matches }) { Text("See your matches") }
                 }

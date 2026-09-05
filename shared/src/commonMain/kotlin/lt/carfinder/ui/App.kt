@@ -7,9 +7,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ThumbsUpDown
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -20,12 +19,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import lt.carfinder.AppViewModel
 import lt.carfinder.Route
 import lt.carfinder.Tab
@@ -48,10 +50,12 @@ fun App(vm: AppViewModel = viewModel { AppViewModel() }) {
             QuizScreen(vm)
             return@MaterialTheme
         }
+        LaunchedEffect(vm.hasPrefs) { vm.ensureCars() }
         val top = vm.stack.lastOrNull()
         BackHandler(enabled = top != null) { vm.back() }
         Surface(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize()) {
+                HarvesterHost(vm)
                 Tabs(vm)
                 if (top != null) {
                     Surface(Modifier.fillMaxSize()) {
@@ -65,17 +69,31 @@ fun App(vm: AppViewModel = viewModel { AppViewModel() }) {
     }
 }
 
+/** Invisible WebView that fetches search pages and galleries so the user never has to browse. */
+@Composable
+private fun HarvesterHost(vm: AppViewModel) {
+    val controller = remember { WebController() }
+    val job = vm.harvester
+    SiteWebView(
+        controller = controller,
+        startUrl = "about:blank",
+        onPayload = vm::onHarvestPayload,
+        onUrlChanged = {},
+        modifier = Modifier.size(0.dp),
+    )
+    LaunchedEffect(job) {
+        if (job == null) return@LaunchedEffect
+        controller.loadUrl(job.url)
+        delay(12_000)
+        vm.harvestDone()
+    }
+}
+
 @Composable
 private fun Tabs(vm: AppViewModel) {
     Scaffold(
         bottomBar = {
             NavigationBar {
-                NavigationBarItem(
-                    selected = vm.tab == Tab.Browse,
-                    onClick = { vm.tab = Tab.Browse },
-                    icon = { Icon(Icons.Default.Search, null) },
-                    label = { Text("Browse") },
-                )
                 NavigationBarItem(
                     selected = vm.tab == Tab.Discover,
                     onClick = { vm.tab = Tab.Discover },
@@ -89,26 +107,19 @@ private fun Tabs(vm: AppViewModel) {
                     label = { Text("Matches") },
                 )
                 NavigationBarItem(
-                    selected = vm.tab == Tab.Profile,
-                    onClick = { vm.tab = Tab.Profile },
-                    icon = { Icon(Icons.Default.Person, null) },
-                    label = { Text("Profile") },
+                    selected = vm.tab == Tab.Refine,
+                    onClick = { vm.tab = Tab.Refine },
+                    icon = { Icon(Icons.Default.Tune, null) },
+                    label = { Text("Refine") },
                 )
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            // The WebView must stay mounted across tab switches or it reloads and loses history.
-            BrowseScreen(vm, visible = vm.tab == Tab.Browse)
-            if (vm.tab != Tab.Browse) {
-                Surface(Modifier.fillMaxSize()) {
-                    when (vm.tab) {
-                        Tab.Discover -> SwipeScreen(vm)
-                        Tab.Matches -> MatchesScreen(vm)
-                        Tab.Profile -> ProfileScreen(vm)
-                        Tab.Browse -> Unit
-                    }
-                }
+        Surface(Modifier.fillMaxSize().padding(padding)) {
+            when (vm.tab) {
+                Tab.Discover -> SwipeScreen(vm)
+                Tab.Matches -> MatchesScreen(vm)
+                Tab.Refine -> RefineScreen(vm)
             }
         }
     }

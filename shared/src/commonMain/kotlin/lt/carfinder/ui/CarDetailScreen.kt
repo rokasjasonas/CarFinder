@@ -22,7 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,7 +50,6 @@ import lt.carfinder.util.asPrice
 import lt.carfinder.util.groupThousands
 import lt.carfinder.util.label
 import kotlin.math.roundToInt
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CarDetailScreen(vm: AppViewModel, carId: String) {
@@ -161,12 +159,3 @@ fun CarDetailScreen(vm: AppViewModel, carId: String) {
     }
 }
 
-@Composable
-private fun SpecCard(label: String, value: String) {
-    Card {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-        }
-    }
-}

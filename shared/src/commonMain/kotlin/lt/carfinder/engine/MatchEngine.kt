@@ -8,6 +8,7 @@ import lt.carfinder.model.Gearbox
 import lt.carfinder.model.Usage
 import lt.carfinder.model.UserPrefs
 import lt.carfinder.util.groupThousands
+import lt.carfinder.util.label
 import lt.carfinder.util.usageLabel
 import kotlin.math.min
 import kotlin.random.Random
@@ -27,12 +28,33 @@ data class ScoredCar(
     val reasons: List<String>,
 )
 
+/** One targeted follow-up question with ready-made answer chips. */
+data class Ask(
+    val id: String,
+    val question: String,
+    val options: List<AskOption>,
+)
+
+data class AskOption(
+    val label: String,
+    val patch: (UserPrefs) -> UserPrefs,
+)
+
+/** The single car we'd put the user's money on, plus how sure we are and what's still unknown. */
+data class BestMatch(
+    val top: ScoredCar,
+    val runnerUp: ScoredCar? = null,
+    val confidence: Int,
+    val ask: Ask? = null,
+    val suggestions: List<String> = emptyList(),
+)
+
 object MatchEngine {
 
     const val HARD_BUDGET_FACTOR = 1.3f
     const val MAX_TASTE_WEIGHT = 3f
     const val LEARNING_RATE = 0.15f
-
+    const val TIEBREAK_WINDOW_POINTS = 3
     private val typicalConsumption = mapOf(
         FuelType.PETROL to 7.0,
         FuelType.DIESEL to 5.8,
@@ -101,6 +123,112 @@ object MatchEngine {
             .map { score(it, prefs, affinity, tasteW) }
             .sortedByDescending { it.score }
 
+    /**
+     * The user pressed "get my match car": pick the single best car, say how sure we are,
+     * and — while we're below the confidence bar — ask the one question whose answer
+     * would most likely change the pick, with chips built from what's actually in the pool.
+     */
+    fun bestMatch(
+        cars: List<Car>,
+        prefs: UserPrefs,
+        affinity: Map<String, Float>,
+        tasteW: Float,
+        swipes: Int,
+        answered: Set<String>,
+    ): BestMatch? {
+        val ranked = rank(cars, prefs, affinity, tasteW)
+        if (ranked.isEmpty()) return null
+        val top = ranked.first()
+        // A sparse listing is a weak "match car" answer: when scores are close, prefer the
+        // car that tells the buyer more. Price trumps everything (a match with no price is
+        // no answer at all); after that, more documented fields win.
+        var pickedIdx = 0
+        var bestKey = tiebreakKey(top.car)
+        for (i in 1 until ranked.size) {
+            val cand = ranked[i]
+            if (top.score - cand.score > TIEBREAK_WINDOW_POINTS) break
+            val key = tiebreakKey(cand.car)
+            if (key > bestKey) {
+                bestKey = key
+                pickedIdx = i
+            }
+        }
+        val picked = ranked[pickedIdx]
+        val runnerUp = ranked.firstOrNull { it !== picked }
+        // Confidence = 50% answered questions + 25% swipe learning + 25% gap to the runner-up.
+        val answersPart = Refine.sharpness(answered) / 100f * 0.5f
+        val swipesPart = tasteW / MAX_TASTE_WEIGHT * 0.25f
+        val separationPart = if (runnerUp == null) 0.25f
+        else ((picked.score - runnerUp.score).toFloat() / 15f).coerceIn(0f, 1f) * 0.25f
+        val confidence = ((answersPart + swipesPart + separationPart) * 100).toInt().coerceIn(0, 100)
+        val suggestions = Refine.EXTRA.filter { it !in answered }.map { suggestLabel(it) }
+        return BestMatch(
+            top = picked,
+            runnerUp = runnerUp,
+            confidence = confidence,
+            ask = if (confidence < 85) nextAsk(ranked, answered) else null,
+            suggestions = suggestions,
+        )
+    }
+
+    private fun tiebreakKey(c: Car): Int = (if (c.priceEur != null) 8 else 0) + documentedFields(c)
+
+    private fun documentedFields(c: Car): Int =
+        listOf(c.mileageKm, c.year, c.bodyType, c.fuelType, c.powerHp, c.engine, c.gearbox)
+            .count { it != null }
+
+    private fun suggestLabel(id: String): String = when (id) {
+        "year" -> "Set a minimum year"
+        "bodies" -> "Pick body styles"
+        "brands" -> "Pick trusted brands"
+        "power" -> "Set minimum power"
+        "mileage" -> "Set a mileage limit"
+        else -> id
+    }
+
+    /** Ask about the dimension with the most spread in the current candidate pool. */
+    private fun nextAsk(ranked: List<ScoredCar>, answered: Set<String>): Ask? {
+        val pool = ranked.take(15)
+        if (pool.size < 3) return null
+        val bodies = pool.mapNotNull { it.car.bodyType }
+        if ("bodies" !in answered && bodies.distinct().size >= 2) {
+            val options = bodies.groupingBy { it }.eachCount().entries
+                .sortedByDescending { it.value }.take(4).map { it.key }
+                .map { b -> AskOption(b.label()) { p -> p.copy(likedBodies = setOf(b)) } }
+            return Ask("bodies", "Which body style speaks to you most?", options)
+        }
+        val hps = pool.mapNotNull { it.car.powerHp }
+        if ("power" !in answered && hps.size >= 3 && (hps.max() - hps.min()) >= 80) {
+            val options = listOf(100, 150, 200)
+                .filter { band -> hps.count { it >= band } >= 2 }
+                .map { band -> AskOption("$band+ hp") { p -> p.copy(minPowerHp = band) } }
+            if (options.isNotEmpty()) return Ask("power", "How much punch do you want?", options)
+        }
+        val kms = pool.mapNotNull { it.car.mileageKm }
+        if ("mileage" !in answered && (kms.maxOrNull() ?: 0) - (kms.minOrNull() ?: 0) >= 60_000) {
+            val options = buildList {
+                if (kms.count { it <= 80_000 } >= 2) add(AskOption("Under 80 000 km") { p -> p.copy(maxMileageKm = 80_000) })
+                if (kms.count { it <= 150_000 } >= 2) add(AskOption("Under 150 000 km") { p -> p.copy(maxMileageKm = 150_000) })
+            }
+            if (options.isNotEmpty()) return Ask("mileage", "How many km is too many for you?", options)
+        }
+        val years = pool.mapNotNull { it.car.year }
+        if ("year" !in answered && years.size >= 3 && (years.max() - years.min()) >= 4) {
+            val options = listOf(2015, 2018, 2020)
+                .filter { y -> years.count { it >= y } >= 2 }
+                .map { y -> AskOption("$y or newer") { p -> p.copy(minYear = y) } }
+            if (options.isNotEmpty()) return Ask("year", "How new should it be?", options)
+        }
+        val brands = pool.mapNotNull { it.car.brand }
+        if ("brands" !in answered && brands.distinct().size >= 3) {
+            val options = brands.groupingBy { it }.eachCount().entries
+                .sortedByDescending { it.value }.take(3).map { it.key }
+                .map { b -> AskOption(b) { p -> p.copy(likedBrands = setOf(b)) } }
+            return Ask("brands", "Which brand do you trust most?", options)
+        }
+        return null
+    }
+
     fun deck(
         cars: List<Car>,
         prefs: UserPrefs,
@@ -133,8 +261,9 @@ object MatchEngine {
         return out
     }
 
-    private fun budget(car: Car, prefs: UserPrefs): Component? {
-        val price = car.priceEur ?: return null
+    private fun budget(car: Car, prefs: UserPrefs): Component {
+        val price = car.priceEur
+        if (price == null) return Component("budget", "Budget", 0.5f, 2f)
         val b = prefs.budgetEur.toFloat()
         val v = if (price <= b) 1f else (1f - (price - b) / (0.3f * b)).coerceIn(0f, 1f)
         val reason = if (price <= b) "${(b - price).toInt().groupThousands()} € under budget" else null

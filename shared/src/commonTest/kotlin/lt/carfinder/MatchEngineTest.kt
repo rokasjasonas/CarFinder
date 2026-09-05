@@ -1,6 +1,7 @@
 package lt.carfinder
 
 import lt.carfinder.engine.MatchEngine
+import lt.carfinder.engine.Refine
 import lt.carfinder.model.BodyType
 import lt.carfinder.model.Car
 import lt.carfinder.model.FuelType
@@ -181,6 +182,70 @@ class MatchEngineTest {
         assertEquals(Sites.AUTOPLIUS.defaultSearch, Sites.AUTOPLIUS.searchPage(1))
         assertEquals("https://autoplius.lt/skelbimai/naudoti-automobiliai?page=3", Sites.AUTOPLIUS.searchPage(3))
         assertEquals("https://autogidas.lt/skelbimai/automobiliai/?page=2", Sites.AUTOGIDAS.searchPage(2))
+    }
+
+    @Test
+    fun bestMatchPicksTopRankedCarWithRunnerUp() {
+        val cars = listOf(
+            car(id = "ap-1", body = BodyType.WAGON, price = 25000),
+            car(id = "ap-2", body = BodyType.SUV, price = 30000),
+            car(id = "ap-3", body = BodyType.HATCHBACK, price = 35000),
+        )
+        val best = MatchEngine.bestMatch(cars, familyPrefs, emptyMap(), 0f, 0, emptySet())!!
+        val ranked = MatchEngine.rank(cars, familyPrefs, emptyMap(), 0f)
+        assertEquals(ranked.first().car.id, best.top.car.id)
+        assertEquals(ranked.first().score, best.top.score)
+        assertEquals(ranked.getOrNull(1)?.car?.id, best.runnerUp?.car?.id)
+    }
+
+    @Test
+    fun confidenceGrowsWithAnswersAndSwipes() {
+        val cars = List(4) { i ->
+            car(id = "ap-$i", body = if (i % 2 == 0) BodyType.WAGON else BodyType.SUV,
+                price = 20000 + i * 1000, hp = 100 + i * 30, year = 2015 + i, mileage = 60_000 + i * 20_000)
+        }
+        val all = (Refine.INITIAL + Refine.EXTRA).toSet()
+        val bare = MatchEngine.bestMatch(cars, familyPrefs, emptyMap(), 0f, 0, emptySet())!!
+        val tuned = MatchEngine.bestMatch(cars, familyPrefs, emptyMap(), MatchEngine.MAX_TASTE_WEIGHT, 10, all)!!
+        assertTrue(bare.confidence < tuned.confidence)
+        assertTrue(bare.confidence <= 25, "no answers, no swipes = low confidence")
+        assertTrue(tuned.confidence >= 75)
+        assertEquals(5, bare.suggestions.size)
+        assertTrue(tuned.suggestions.isEmpty())
+        assertTrue(tuned.ask == null)
+    }
+
+    @Test
+    fun matchCarPrefersBetterDocumentedCarWithinWindow() {
+        val sparse = car(id = "ag-1", price = 20000, body = BodyType.WAGON, year = 2022, mileage = null, hp = null)
+        val rich = car(id = "ap-2", price = 30800, body = BodyType.SUV, year = 2022, mileage = 60_000, hp = 286)
+        val close = MatchEngine.bestMatch(listOf(sparse, rich), familyPrefs, emptyMap(), 0f, 0, emptySet())!!
+        assertEquals("ap-2", close.top.car.id)
+        assertEquals("ag-1", close.runnerUp?.car?.id)
+        val far = car(id = "ap-3", price = 45000, body = BodyType.SUV, year = 2013, mileage = 240_000, hp = 70)
+        val kept = MatchEngine.bestMatch(listOf(rich, far), familyPrefs, emptyMap(), 0f, 0, emptySet())!!
+        assertEquals("ap-2", kept.top.car.id)
+        val richPriceless = car(id = "ap-4", price = null, body = BodyType.SUV, year = 2023, mileage = 40_000, hp = 250)
+        val priceWins = MatchEngine.bestMatch(listOf(richPriceless, sparse), familyPrefs, emptyMap(), 0f, 0, emptySet())!!
+        assertEquals("ag-1", priceWins.top.car.id)
+        assertEquals("ap-4", priceWins.runnerUp?.car?.id)
+    }
+
+    @Test
+    fun asksAboutBodyStyleWhenUnansweredAndDiverse() {
+        val cars = listOf(
+            car(id = "ap-1", body = BodyType.WAGON, price = 20000),
+            car(id = "ap-2", body = BodyType.SUV, price = 22000),
+            car(id = "ap-3", body = BodyType.SUV, price = 24000),
+            car(id = "ap-4", body = BodyType.HATCHBACK, price = 26000),
+        )
+        val ask = MatchEngine.bestMatch(cars, familyPrefs, emptyMap(), 0f, 0, emptySet())!!.ask!!
+        assertEquals("bodies", ask.id)
+        assertTrue(ask.options.map { it.label }.contains("SUV"))
+        val withSuv = ask.options.first { it.label == "SUV" }.patch(familyPrefs)
+        assertEquals(setOf(BodyType.SUV), withSuv.likedBodies)
+        val next = MatchEngine.bestMatch(cars, withSuv, emptyMap(), 0f, 0, setOf("bodies"))
+        assertTrue(next!!.ask == null)
     }
 }
 

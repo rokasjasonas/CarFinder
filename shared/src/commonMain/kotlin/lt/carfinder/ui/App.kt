@@ -61,6 +61,7 @@ fun App(vm: AppViewModel = viewModel { AppViewModel() }) {
                     Surface(Modifier.fillMaxSize()) {
                         when (top) {
                             is Route.CarDetail -> CarDetailScreen(vm, top.carId)
+                            is Route.MatchCar -> MatchCarScreen(vm)
                         }
                     }
                 }

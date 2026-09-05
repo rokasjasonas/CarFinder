@@ -14,11 +14,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -85,7 +88,8 @@ fun SwipeScreen(vm: AppViewModel) {
                 }
             }
             Text(
-                "Swipe right if you love it · left to pass",
+                if (state.swipes.isEmpty()) "Swipe right if you love it · left to pass"
+                else "Every swipe teaches me what you want · ${state.swipes.size} so far",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -152,7 +156,7 @@ fun SwipeScreen(vm: AppViewModel) {
         }
 
         Row(
-            Modifier.fillMaxWidth().padding(bottom = 16.dp, top = 4.dp),
+            Modifier.fillMaxWidth().padding(bottom = 8.dp, top = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -170,6 +174,16 @@ fun SwipeScreen(vm: AppViewModel) {
                 modifier = Modifier.size(56.dp),
                 colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = Color(0xFFE6F4EA), contentColor = Color(0xFF2E7D32)),
             ) { Icon(Icons.Default.Favorite, "Like") }
+        }
+
+        Button(
+            onClick = { vm.open(Route.MatchCar) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Icon(Icons.Default.Star, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Get my match car", style = MaterialTheme.typography.titleMedium)
         }
     }
 }

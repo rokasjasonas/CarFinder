@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import lt.carfinder.data.loadState
 import lt.carfinder.data.saveState
 import lt.carfinder.engine.MatchEngine
+import lt.carfinder.engine.BestMatch
 import lt.carfinder.engine.Refine
 import lt.carfinder.engine.ScoredCar
 import lt.carfinder.model.Car
@@ -24,6 +25,7 @@ sealed interface Tab {
 
 sealed interface Route {
     data class CarDetail(val carId: String) : Route
+    data object MatchCar : Route
 }
 
 data class FetchJob(val url: String, val n: Int)
@@ -177,6 +179,13 @@ class AppViewModel : ViewModel() {
         val prefs = state.prefs ?: return emptyList()
         return MatchEngine.rank(state.listings, prefs, state.affinity, tasteW())
     }
+
+    fun bestMatch(): BestMatch? {
+        val prefs = state.prefs ?: return null
+        return MatchEngine.bestMatch(state.listings, prefs, state.affinity, tasteW(), state.swipes.size, state.answered)
+    }
+
+    fun answerAsk(id: String, patch: (UserPrefs) -> UserPrefs) = answerRefine(id, patch)
 
     fun scored(car: Car): ScoredCar? =
         state.prefs?.let { MatchEngine.score(car, it, state.affinity, tasteW()) }
